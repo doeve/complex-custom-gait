@@ -1,0 +1,23 @@
+{
+  "users": {
+    "1": {
+      "id": 1,
+      "name": "David",
+      "training_videos": [
+        "data/training_videos/user_1/david.mp4"
+      ],
+      "date_added": "2025-01-16",
+      "last_trained": "2025-01-16"
+    },
+    "2": {
+      "id": 2,
+      "name": "Tibi",
+      "training_videos": [
+        "data/training_videos/user_2/tibi.mp4"
+      ],
+      "date_added": "2025-01-16",
+      "last_trained": "2025-01-16"
+    }
+  },
+  "next_user_id": 3
+}

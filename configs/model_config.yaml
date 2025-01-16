@@ -1,0 +1,16 @@
+pose_network:
+  image_size: 299
+  heatmap_size: 289
+  features: 32
+  model_path: "models/pose_estimation/MPII+LSP.ckpt"
+
+gait_network:
+  features: 512
+  num_rnn_layers: 2
+  recurrent_unit: "GRU"
+  model_path: "models/gait_recognition/M+L-GRU-2.ckpt"
+
+system:
+  min_confidence_threshold: 0.8
+  frame_sampling_rate: 30
+  temporal_window_size: 64

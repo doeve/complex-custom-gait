@@ -1,0 +1,32 @@
+# Core ML/DL libraries
+tensorflow>=2.16.1    # Latest stable version
+numpy>=1.23.5        # Required for numerical operations
+scipy>=1.9.3         # Required for scientific computations
+
+# Computer Vision
+opencv-python>=4.6.0  # For video processing and image operations
+Pillow>=9.3.0        # For image processing
+
+# Data handling and processing
+pyyaml>=6.0          # For reading config files
+pandas>=1.5.2        # For data manipulation
+h5py>=3.7.0          # For handling HDF5 files
+
+# Type checking and data classes
+typing-extensions>=4.4.0
+dataclasses>=0.6
+
+# Progress bars and logging
+tqdm>=4.64.1         # For progress bars
+loguru>=0.6.0        # For better logging
+
+# Development tools
+pytest>=7.2.0        # For testing
+black>=22.3.0        # For code formatting
+isort>=5.10.1        # For import sorting
+flake8>=5.0.4        # For code linting
+
+# Optional visualization tools
+matplotlib>=3.6.2    # For plotting and visualization
+seaborn>=0.12.1      # For statistical visualizations
+jupyter>=1.0.0       # For running notebooks
