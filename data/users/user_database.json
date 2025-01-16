@@ -5,14 +5,14 @@
       "training_videos": [
         "data/training_videos/user_1/david.mp4"
       ],
-      "last_trained": "2025-01-16T17:47:15.834533"
+      "last_trained": "2025-01-16T17:57:16.186133"
     },
     "2": {
       "name": "Tibi",
       "training_videos": [
         "data/training_videos/user_2/tibi.mp4"
       ],
-      "last_trained": "2025-01-16T17:47:16.692113"
+      "last_trained": "2025-01-16T17:57:17.456753"
     }
   }
 }

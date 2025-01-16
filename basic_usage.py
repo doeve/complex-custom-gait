@@ -1,6 +1,7 @@
 # File: examples/basic_usage.py
 
 from pathlib import Path
+import sys
 from src.models.recognition_system import GaitRecognitionSystem
 from loguru import logger
 
@@ -22,6 +23,9 @@ def main():
     # for video_path in training_videos:
     #     system.add_training_video(user_id, video_path)
     #     logger.info(f"Added training video: {video_path}")
+
+    logger.remove()
+    logger.add(sys.stderr, level="DEBUG")
 
     # Train the model for this user
     logger.info("Training model for user...")
