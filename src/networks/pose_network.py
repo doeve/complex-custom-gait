@@ -1,11 +1,9 @@
-# File: src/networks/pose_network.py
-
 import tensorflow as tf
 import numpy as np
 from typing import Tuple, Optional, Dict, List
 
-class ModernPoseNetwork(tf.keras.Model):
-    """Modern implementation of the Pose Estimation Network with TF2 compatibility."""
+class ModernPoseNetwork:
+    """Modern implementation of the Pose Estimation Network with pure TensorFlow."""
     
     def __init__(self, image_size: int = 299, heatmap_size: int = 289, features: int = 32):
         """Initialize the pose network.
@@ -15,125 +13,215 @@ class ModernPoseNetwork(tf.keras.Model):
             heatmap_size: Output heatmap size
             features: Number of features
         """
-        super(ModernPoseNetwork, self).__init__()
-        
         self.image_size = image_size
         self.heatmap_size = heatmap_size
         self.features = features
         self.smooth_size = 21
         self.sigma = 1.0
         
-        # Build network components
-        self._build_layers()
-        self._build_gaussian_filter()
+        # Initialize weights
+        self.weights = {}
+        self.build_network()
 
-    def _build_layers(self):
-        """Build all network layers."""
+    def build_network(self):
+        """Build network and initialize weights."""
         # Initial convolutions
-        self.conv1 = tf.keras.layers.Conv2D(
-            32, kernel_size=3, strides=2, padding='valid', name='conv1'
-        )
-        self.bn1 = tf.keras.layers.BatchNormalization(name='bn1')
+        self.weights['conv1'] = {
+            'kernel': tf.Variable(tf.random.normal([3, 3, 3, 32])),
+            'bias': tf.Variable(tf.zeros([32]))
+        }
+        self.weights['bn1'] = {
+            'gamma': tf.Variable(tf.ones([32])),
+            'beta': tf.Variable(tf.zeros([32])),
+            'moving_mean': tf.Variable(tf.zeros([32]), trainable=False),
+            'moving_variance': tf.Variable(tf.ones([32]), trainable=False)
+        }
         
-        # Inception-ResNet blocks
-        self.inception_blocks = []
+        # Build inception blocks
         for i in range(3):
-            block = self._build_inception_block(f'inception_block_{i}')
-            self.inception_blocks.append(block)
+            block_name = f'inception_block_{i}'
+            self._init_inception_block_weights(block_name)
         
         # Auxiliary tower
-        self.aux_pool = tf.keras.layers.AveragePooling2D(5, strides=1, padding='same')
-        self.aux_conv1 = tf.keras.layers.Conv2D(128, 1, name='aux_conv1')
-        self.aux_conv2 = tf.keras.layers.Conv2D(768, 5, padding='same', name='aux_conv2')
+        self.weights['aux_conv1'] = {
+            'kernel': tf.Variable(tf.random.normal([1, 1, self.features, 128])),
+            'bias': tf.Variable(tf.zeros([128]))
+        }
+        self.weights['aux_conv2'] = {
+            'kernel': tf.Variable(tf.random.normal([5, 5, 128, 768])),
+            'bias': tf.Variable(tf.zeros([768]))
+        }
         
         # Final layers
-        self.final_conv = tf.keras.layers.Conv2D(self.features, 1, name='final_conv')
+        self.weights['final_conv'] = {
+            'kernel': tf.Variable(tf.random.normal([1, 1, 768, self.features])),
+            'bias': tf.Variable(tf.zeros([self.features]))
+        }
         
         # Upsampling
-        self.upsample = tf.keras.layers.Conv2DTranspose(
-            16,  # Number of joints
-            kernel_size=17,
-            strides=17,
-            padding='valid',
-            name='upsample'
-        )
+        self.weights['upsample'] = {
+            'kernel': tf.Variable(tf.random.normal([17, 17, 16, self.features])),
+            'bias': tf.Variable(tf.zeros([16]))
+        }
+        
+        # Build Gaussian filter
+        self._build_gaussian_filter()
 
-    def _build_inception_block(self, name: str) -> tf.keras.Model:
-        """Build an Inception-ResNet block."""
-        input_layer = tf.keras.layers.Input(shape=(None, None, self.features))
+    def _init_inception_block_weights(self, name: str):
+        """Initialize weights for an Inception-ResNet block."""
+        self.weights[f'{name}_branch1'] = {
+            'kernel': tf.Variable(tf.random.normal([1, 1, self.features, 32])),
+            'bias': tf.Variable(tf.zeros([32]))
+        }
         
-        # Branch 1
-        branch1 = tf.keras.layers.Conv2D(32, 1, name=f'{name}_branch1_conv')(input_layer)
+        self.weights[f'{name}_branch2'] = {
+            'conv1_kernel': tf.Variable(tf.random.normal([1, 1, self.features, 32])),
+            'conv1_bias': tf.Variable(tf.zeros([32])),
+            'conv2_kernel': tf.Variable(tf.random.normal([3, 3, 32, 32])),
+            'conv2_bias': tf.Variable(tf.zeros([32]))
+        }
         
-        # Branch 2
-        branch2 = tf.keras.layers.Conv2D(32, 1, name=f'{name}_branch2_conv1')(input_layer)
-        branch2 = tf.keras.layers.Conv2D(32, 3, padding='same',
-                                       name=f'{name}_branch2_conv2')(branch2)
+        self.weights[f'{name}_branch3'] = {
+            'conv1_kernel': tf.Variable(tf.random.normal([1, 1, self.features, 32])),
+            'conv1_bias': tf.Variable(tf.zeros([32])),
+            'conv2_kernel': tf.Variable(tf.random.normal([3, 3, 32, 48])),
+            'conv2_bias': tf.Variable(tf.zeros([48])),
+            'conv3_kernel': tf.Variable(tf.random.normal([3, 3, 48, 64])),
+            'conv3_bias': tf.Variable(tf.zeros([64]))
+        }
         
-        # Branch 3
-        branch3 = tf.keras.layers.Conv2D(32, 1, name=f'{name}_branch3_conv1')(input_layer)
-        branch3 = tf.keras.layers.Conv2D(48, 3, padding='same',
-                                       name=f'{name}_branch3_conv2')(branch3)
-        branch3 = tf.keras.layers.Conv2D(64, 3, padding='same',
-                                       name=f'{name}_branch3_conv3')(branch3)
-        
-        # Concatenate branches
-        concat = tf.keras.layers.Concatenate(axis=-1)([branch1, branch2, branch3])
-        
-        # 1x1 convolution to match input dimensions
-        output = tf.keras.layers.Conv2D(self.features, 1,
-                                      name=f'{name}_project')(concat)
-        
-        # Residual connection
-        scaled = tf.keras.layers.Lambda(
-            lambda x: x[0] + 0.1 * x[1])([input_layer, output])
-        
-        return tf.keras.Model(inputs=input_layer, outputs=scaled, name=name)
+        self.weights[f'{name}_project'] = {
+            'kernel': tf.Variable(tf.random.normal([1, 1, 128, self.features])),
+            'bias': tf.Variable(tf.zeros([self.features]))
+        }
 
     def _build_gaussian_filter(self):
         """Build Gaussian smoothing filter."""
-        # Create Gaussian kernel
         size = self.smooth_size
         x = tf.range(-size//2 + 1, size//2 + 1, dtype=tf.float32)
         gaussian = tf.exp(-tf.square(x) / (2 * self.sigma**2))
         gaussian = gaussian / tf.reduce_sum(gaussian)
         
-        # Create separable 2D filters for each channel
-        gaussian_h = tf.reshape(gaussian, [size, 1, 1, 1])
-        gaussian_v = tf.reshape(gaussian, [1, size, 1, 1])
-        
-        # Store filters
-        self.gaussian_h = gaussian_h
-        self.gaussian_v = gaussian_v
+        # Create separable 2D filters
+        self.gaussian_h = tf.reshape(gaussian, [size, 1, 1, 1])
+        self.gaussian_v = tf.reshape(gaussian, [1, size, 1, 1])
 
-    def call(self, inputs, training=False):
-        """Forward pass of the network."""
-        # Initial processing
+    def process_to_features(self, inputs, training=False):
+        """Process inputs up to feature extraction."""
+        # Preprocess
         x = self._preprocess(inputs)
-        x = self.conv1(x)
-        x = self.bn1(x, training=training)
+        
+        # Initial convolutions
+        x = tf.nn.conv2d(x, self.weights['conv1']['kernel'], 
+                        strides=[1, 2, 2, 1], padding='VALID')
+        x = tf.nn.bias_add(x, self.weights['conv1']['bias'])
+        
+        # Batch normalization
+        if training:
+            mean, variance = tf.nn.moments(x, axes=[0, 1, 2])
+            x = tf.nn.batch_normalization(
+                x, mean, variance,
+                self.weights['bn1']['beta'],
+                self.weights['bn1']['gamma'],
+                1e-3
+            )
+        else:
+            x = tf.nn.batch_normalization(
+                x,
+                self.weights['bn1']['moving_mean'],
+                self.weights['bn1']['moving_variance'],
+                self.weights['bn1']['beta'],
+                self.weights['bn1']['gamma'],
+                1e-3
+            )
+        
         x = tf.nn.relu(x)
         
-        # Pass through Inception-ResNet blocks
-        for block in self.inception_blocks:
-            x = block(x)
-        
-        # Store feature tensor for gait recognition
-        self.feature_tensor = x
+        # Inception-ResNet blocks
+        for i in range(3):
+            x = self._forward_inception_block(x, f'inception_block_{i}')
+            
+        return x
+
+    @tf.function
+    def feed_forward_features(self, x: tf.Tensor) -> tf.Tensor:
+        """Extract features from input images."""
+        return self.process_to_features(x)
+
+    def process_features_to_output(self, features):
+        """Process features to final output."""
+        x = features
         
         # Auxiliary tower
-        x = self.aux_pool(x)
-        x = self.aux_conv1(x)
-        x = self.aux_conv2(x)
+        x = tf.nn.avg_pool2d(x, ksize=5, strides=1, padding='SAME')
+        x = tf.nn.conv2d(x, self.weights['aux_conv1']['kernel'],
+                        strides=1, padding='VALID')
+        x = tf.nn.bias_add(x, self.weights['aux_conv1']['bias'])
+        x = tf.nn.conv2d(x, self.weights['aux_conv2']['kernel'],
+                        strides=1, padding='SAME')
+        x = tf.nn.bias_add(x, self.weights['aux_conv2']['bias'])
         
         # Final processing
-        x = self.final_conv(x)
-        x = self.upsample(x)
+        x = tf.nn.conv2d(x, self.weights['final_conv']['kernel'],
+                        strides=1, padding='VALID')
+        x = tf.nn.bias_add(x, self.weights['final_conv']['bias'])
+        
+        # Upsampling
+        x = tf.nn.conv2d_transpose(
+            x, self.weights['upsample']['kernel'],
+            output_shape=[tf.shape(features)[0], self.heatmap_size, self.heatmap_size, 16],
+            strides=[1, 17, 17, 1],
+            padding='VALID'
+        )
+        x = tf.nn.bias_add(x, self.weights['upsample']['bias'])
         
         # Apply Gaussian smoothing
         x = self._apply_gaussian_smoothing(x)
         
         return x
+
+    @tf.function
+    def __call__(self, inputs, training=False):
+        """Forward pass of the network."""
+        features = self.process_to_features(inputs, training)
+        return self.process_features_to_output(features)
+
+    def _forward_inception_block(self, x: tf.Tensor, name: str) -> tf.Tensor:
+        """Forward pass through an Inception-ResNet block."""
+        # Branch 1
+        branch1 = tf.nn.conv2d(x, self.weights[f'{name}_branch1']['kernel'],
+                              strides=1, padding='VALID')
+        branch1 = tf.nn.bias_add(branch1, self.weights[f'{name}_branch1']['bias'])
+        
+        # Branch 2
+        branch2 = tf.nn.conv2d(x, self.weights[f'{name}_branch2']['conv1_kernel'],
+                              strides=1, padding='VALID')
+        branch2 = tf.nn.bias_add(branch2, self.weights[f'{name}_branch2']['conv1_bias'])
+        branch2 = tf.nn.conv2d(branch2, self.weights[f'{name}_branch2']['conv2_kernel'],
+                              strides=1, padding='SAME')
+        branch2 = tf.nn.bias_add(branch2, self.weights[f'{name}_branch2']['conv2_bias'])
+        
+        # Branch 3
+        branch3 = tf.nn.conv2d(x, self.weights[f'{name}_branch3']['conv1_kernel'],
+                              strides=1, padding='VALID')
+        branch3 = tf.nn.bias_add(branch3, self.weights[f'{name}_branch3']['conv1_bias'])
+        branch3 = tf.nn.conv2d(branch3, self.weights[f'{name}_branch3']['conv2_kernel'],
+                              strides=1, padding='SAME')
+        branch3 = tf.nn.bias_add(branch3, self.weights[f'{name}_branch3']['conv2_bias'])
+        branch3 = tf.nn.conv2d(branch3, self.weights[f'{name}_branch3']['conv3_kernel'],
+                              strides=1, padding='SAME')
+        branch3 = tf.nn.bias_add(branch3, self.weights[f'{name}_branch3']['conv3_bias'])
+        
+        # Concatenate branches
+        concat = tf.concat([branch1, branch2, branch3], axis=-1)
+        
+        # Project back to input dimensions
+        output = tf.nn.conv2d(concat, self.weights[f'{name}_project']['kernel'],
+                            strides=1, padding='VALID')
+        output = tf.nn.bias_add(output, self.weights[f'{name}_project']['bias'])
+        
+        # Residual connection
+        return x + 0.1 * output
 
     def _preprocess(self, inputs: tf.Tensor) -> tf.Tensor:
         """Preprocess input images."""
@@ -143,90 +231,34 @@ class ModernPoseNetwork(tf.keras.Model):
 
     def _apply_gaussian_smoothing(self, x: tf.Tensor) -> tf.Tensor:
         """Apply Gaussian smoothing to heatmaps."""
-        # Get shape
-        batch_size = tf.shape(x)[0]
-        num_channels = tf.shape(x)[-1]
-        
-        # Separate channels and apply smoothing
         channels = tf.unstack(x, axis=-1)
         smoothed_channels = []
         
         for channel in channels:
-            # Add channel dimension
             channel = tf.expand_dims(channel, -1)
-            
-            # Apply horizontal smoothing
-            channel = tf.nn.conv2d(
-                channel,
-                self.gaussian_h,
-                strides=[1, 1, 1, 1],
-                padding='SAME'
-            )
-            
-            # Apply vertical smoothing
-            channel = tf.nn.conv2d(
-                channel,
-                self.gaussian_v,
-                strides=[1, 1, 1, 1],
-                padding='SAME'
-            )
-            
+            channel = tf.nn.conv2d(channel, self.gaussian_h,
+                                 strides=[1, 1, 1, 1], padding='SAME')
+            channel = tf.nn.conv2d(channel, self.gaussian_v,
+                                 strides=[1, 1, 1, 1], padding='SAME')
             smoothed_channels.append(tf.squeeze(channel, -1))
         
-        # Stack channels back together
         return tf.stack(smoothed_channels, axis=-1)
 
-    @tf.function
-    def feed_forward_features(self, x: tf.Tensor) -> tf.Tensor:
-        """Extract features from input images."""
-        self(x)  # Forward pass
-        return self.feature_tensor
-
-    @tf.function
-    def estimate_joints(self, x: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        """Estimate joint positions from input images."""
-        heatmaps = self(x)
-        
-        # Process heatmaps to get joint positions
-        batch_size = tf.shape(heatmaps)[0]
-        height = tf.shape(heatmaps)[1]
-        width = tf.shape(heatmaps)[2]
-        num_joints = tf.shape(heatmaps)[3]
-        
-        # Find peak locations
-        heatmaps_flat = tf.reshape(heatmaps, [batch_size, -1, num_joints])
-        max_vals = tf.reduce_max(heatmaps_flat, axis=1)
-        argmax = tf.argmax(heatmaps_flat, axis=1)
-        
-        # Convert to coordinates
-        y_coords = tf.cast(argmax // width, tf.float32)
-        x_coords = tf.cast(argmax % width, tf.float32)
-        
-        # Scale coordinates to original image size
-        scale = tf.cast(self.image_size / self.heatmap_size, tf.float32)
-        y_coords = y_coords * scale
-        x_coords = x_coords * scale
-        
-        return y_coords, x_coords, max_vals
-
-    def load_weights(self, filepath: str):
-        """Load model weights.
+    def load_weights(self, ckpt_path: str):
+        """Load weights from checkpoint file.
         
         Args:
-            filepath: Path to the weights file
+            ckpt_path: Path to the checkpoint file
         """
-        try:
-            super().load_weights(filepath)
-        except Exception as e:
-            raise ValueError(f"Failed to load weights from {filepath}: {str(e)}")
+        checkpoint = tf.train.Checkpoint(**self.weights)
+        status = checkpoint.restore(ckpt_path)
+        status.expect_partial()
 
-    def save_weights(self, filepath: str):
-        """Save model weights.
+    def save_weights(self, ckpt_path: str):
+        """Save weights to checkpoint file.
         
         Args:
-            filepath: Path to save the weights
+            ckpt_path: Path to save the checkpoint
         """
-        try:
-            super().save_weights(filepath)
-        except Exception as e:
-            raise ValueError(f"Failed to save weights to {filepath}: {str(e)}")
+        checkpoint = tf.train.Checkpoint(**self.weights)
+        checkpoint.save(ckpt_path)

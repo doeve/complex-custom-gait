@@ -31,7 +31,8 @@ def main():
     logger.info("Training complete for user 2")
 
     # Test identification
-    test_video = "data/sample_videos/tibi_test.mp4"
+    # test_video = "data/test_videos/tibi_test_2.mp4"
+    test_video = "data/training_videos/user_2/tibi.mp4" #testing with same data to see if recognizes same
     identified_id, confidence = system.identify_person(test_video)
 
     if identified_id is not None:
